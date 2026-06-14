@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "request_id": "req_entity_001",
+  "trace_id": "trace_entity_001",
+  "algorithm_id": "llm_entity_normalizer",
+  "version": "1.0.0",
+  "outputs": {
+    "normalized_entities": [
+      {
+        "canonical_name": "alice",
+        "entity_type": "person"
+      }
+    ],
+    "confidence": 0.88
+  },
+  "usage": {
+    "latency_ms": 360
+  },
+  "error": null
+}

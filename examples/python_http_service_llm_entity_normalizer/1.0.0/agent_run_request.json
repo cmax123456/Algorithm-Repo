@@ -1,0 +1,35 @@
+{
+  "request_id": "req_entity_route_001",
+  "trace_id": "trace_entity_route_001",
+  "condition": {
+    "task_family": "generation",
+    "required_capabilities": ["entity_normalization"],
+    "preferred_capabilities": ["structured_summary"],
+    "input_modalities": ["text", "structured_json"],
+    "intent_keywords": ["normalize", "entity"],
+    "input_chars": 64,
+    "request_bytes": 512,
+    "max_latency_ms": 1200,
+    "allow_human_review": false,
+    "max_risk_level": "low",
+    "hardware_profile": {
+      "has_gpu": false,
+      "available_gpu_memory_mb": 0,
+      "available_system_memory_mb": 4096,
+      "available_cpu_cores": 4,
+      "preferred_device": "cpu"
+    }
+  },
+  "inputs": {
+    "task_text": "Normalize the extracted entities for storage",
+    "entities": [
+      {
+        "name": "Alice",
+        "type": "person"
+      }
+    ]
+  },
+  "params": {}
+}
+
+

@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "request_id": "req_risk_001",
+  "trace_id": "trace_risk_001",
+  "algorithm_id": "llm_risk_review_advisor",
+  "version": "1.0.0",
+  "outputs": {
+    "risk_level": "high",
+    "recommendation": "Escalate to manual review",
+    "confidence": 0.93
+  },
+  "usage": {
+    "latency_ms": 720
+  },
+  "error": null
+}

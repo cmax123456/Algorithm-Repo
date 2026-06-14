@@ -1,0 +1,24 @@
+{
+  "title": "LLM Risk Review Advisor Output",
+  "type": "object",
+  "required": [
+    "risk_level",
+    "recommendation",
+    "confidence"
+  ],
+  "properties": {
+    "risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "recommendation": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    }
+  },
+  "additionalProperties": false
+}

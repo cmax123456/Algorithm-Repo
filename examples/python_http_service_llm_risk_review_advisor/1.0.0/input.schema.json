@@ -1,0 +1,24 @@
+{
+  "title": "LLM Risk Review Advisor Input",
+  "type": "object",
+  "required": [
+    "task_text",
+    "entities"
+  ],
+  "properties": {
+    "task_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16000
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "maxItems": 128
+    }
+  },
+  "additionalProperties": false
+}

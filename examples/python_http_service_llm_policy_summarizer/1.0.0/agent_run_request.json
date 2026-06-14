@@ -1,0 +1,30 @@
+{
+  "request_id": "req_policy_route_001",
+  "trace_id": "trace_policy_route_001",
+  "condition": {
+    "task_family": "generation",
+    "required_capabilities": ["policy_summary"],
+    "preferred_capabilities": ["structured_summary"],
+    "input_modalities": ["text", "structured_json"],
+    "intent_keywords": ["summary", "policy"],
+    "input_chars": 64,
+    "request_bytes": 256,
+    "max_latency_ms": 1500,
+    "allow_human_review": false,
+    "max_risk_level": "low",
+    "hardware_profile": {
+      "has_gpu": false,
+      "available_gpu_memory_mb": 0,
+      "available_system_memory_mb": 4096,
+      "available_cpu_cores": 4,
+      "preferred_device": "cpu"
+    }
+  },
+  "inputs": {
+    "task_text": "Summarize the policy update for reviewers",
+    "entities": []
+  },
+  "params": {}
+}
+
+

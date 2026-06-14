@@ -1,0 +1,65 @@
+agent_card:
+  examples:
+    - input:
+        entities:
+          []
+        task_text: Review the task for high-risk escalation
+      output:
+        confidence: 0.93000000000000005
+        recommendation: Escalate to manual review
+        risk_level: high
+  input_description: "The request JSON must contain task_text and entities.\n"
+  output_description: "Returns risk_level, recommendation and confidence.\n"
+  summary: "Assess task risk signals and produce a review recommendation for human operators.\n"
+  when_not_to_use:
+    - Need only a concise summary without risk judgment
+    - Need fixed-label classification only
+  when_to_use:
+    - Need a risk score and review recommendation from text and entities
+    - Need to decide whether manual review is required
+algorithm_id: llm_risk_review_advisor
+backend_type: python_http_service
+capabilities:
+  - risk_assessment
+  - review_recommendation
+constraints:
+  batch_supported: false
+  max_input_chars: 16000
+  max_request_bytes: 8388608
+  streaming_supported: false
+display_name: LLM Risk Review Advisor
+hardware_requirements:
+  min_cpu_cores: 4
+  min_gpu_memory_mb: 8192
+  min_system_memory_mb: 8192
+  preferred_device: gpu
+  requires_gpu: true
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:8082/predict
+    execution_provider: ""
+    health_endpoint: http://127.0.0.1:8082/health
+    metadata_endpoint: http://127.0.0.1:8082/metadata
+    model_uri: ""
+    timeout_ms: 10000
+modalities:
+  input:
+    - text
+    - structured_json
+  output:
+    - structured_json
+performance:
+  latency_ms_p50: 650
+  latency_ms_p95: 1400
+  primary_metric: risk_quality
+  primary_score: 0.91000000000000003
+safety:
+  requires_human_review: true
+  risk_level: medium
+status: draft
+task_family: generation
+version: 1.0.0
+

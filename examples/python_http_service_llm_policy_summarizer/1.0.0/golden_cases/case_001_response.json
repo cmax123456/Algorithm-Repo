@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "request_id": "req_policy_001",
+  "trace_id": "trace_policy_001",
+  "algorithm_id": "llm_policy_summarizer",
+  "version": "1.0.0",
+  "outputs": {
+    "summary": "Policy update summary for reviewers.",
+    "key_points": [
+      "Focus on the main policy change",
+      "Reviewers should verify impacted entities"
+    ],
+    "confidence": 0.9
+  },
+  "usage": {
+    "latency_ms": 480
+  },
+  "error": null
+}

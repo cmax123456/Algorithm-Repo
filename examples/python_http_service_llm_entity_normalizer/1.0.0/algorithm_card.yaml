@@ -1,0 +1,66 @@
+agent_card:
+  examples:
+    - input:
+        entities:
+          - name: Alice
+            type: person
+        task_text: Normalize the extracted entities for storage
+      output:
+        confidence: 0.88
+        normalized_entities:
+          - canonical_name: alice
+            entity_type: person
+  input_description: "The request JSON must contain task_text and entities.\n"
+  output_description: "Returns normalized_entities and confidence.\n"
+  summary: "Normalize extracted entities into canonical structured fields for downstream workflows.\n"
+  when_not_to_use:
+    - Need only a policy summary without normalized entities
+    - Need risk recommendation or manual review decision
+  when_to_use:
+    - Need canonical entity values for downstream systems
+    - Need structured normalization from text and entities
+algorithm_id: llm_entity_normalizer
+backend_type: python_http_service
+capabilities:
+  - entity_normalization
+  - structured_summary
+constraints:
+  batch_supported: false
+  max_input_chars: 12000
+  max_request_bytes: 6291456
+  streaming_supported: false
+display_name: LLM Entity Normalizer
+hardware_requirements:
+  min_cpu_cores: 2
+  min_system_memory_mb: 1024
+  preferred_device: cpu
+  requires_gpu: false
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:8083/predict
+    execution_provider: ""
+    health_endpoint: http://127.0.0.1:8083/health
+    metadata_endpoint: http://127.0.0.1:8083/metadata
+    model_uri: ""
+    timeout_ms: 10000
+modalities:
+  input:
+    - text
+    - structured_json
+  output:
+    - structured_json
+performance:
+  latency_ms_p50: 350
+  latency_ms_p95: 700
+  primary_metric: normalization_quality
+  primary_score: 0.90000000000000002
+safety:
+  requires_human_review: false
+  risk_level: low
+status: draft
+task_family: generation
+version: 1.0.0
+

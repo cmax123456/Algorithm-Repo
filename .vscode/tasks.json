@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "algolib: configure",
+      "type": "shell",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "call \"C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 >nul && cmake -S . -B build -G Ninja"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "algolib: build",
+      "type": "shell",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "call \"C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 >nul && cmake --build build"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "dependsOn": "algolib: configure",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "algolib: test",
+      "type": "shell",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "call \"C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 >nul && ctest --test-dir build --output-on-failure"
+      ],
+      "group": "test",
+      "dependsOn": "algolib: build",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+agent_card:
+  examples:
+    - input:
+        entities:
+          []
+        task_text: Summarize the policy update for reviewers
+      output:
+        confidence: 0.90000000000000002
+        key_points:
+          - Focus on the main policy change
+          - Reviewers should verify impacted entities
+        summary: Policy update summary for reviewers.
+  input_description: "The request JSON must contain task_text and entities.\n"
+  output_description: "Returns summary, key_points and confidence.\n"
+  summary: "Summarize policy or workflow text into a concise structured summary.\n"
+  when_not_to_use:
+    - Need risk scoring or manual review recommendation
+    - Need fixed-label classification only
+  when_to_use:
+    - Need a concise policy summary from text and entities
+    - Need short key points for downstream review
+algorithm_id: llm_policy_summarizer
+backend_type: python_http_service
+capabilities:
+  - policy_summary
+  - structured_summary
+constraints:
+  batch_supported: false
+  max_input_chars: 20000
+  max_request_bytes: 10485760
+  streaming_supported: false
+display_name: LLM Policy Summarizer
+hardware_requirements:
+  min_cpu_cores: 2
+  min_system_memory_mb: 2048
+  preferred_device: cpu
+  requires_gpu: false
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:8081/predict
+    execution_provider: ""
+    health_endpoint: http://127.0.0.1:8081/health
+    metadata_endpoint: http://127.0.0.1:8081/metadata
+    model_uri: ""
+    timeout_ms: 10000
+modalities:
+  input:
+    - text
+    - structured_json
+  output:
+    - structured_json
+performance:
+  latency_ms_p50: 400
+  latency_ms_p95: 900
+  primary_metric: summary_quality
+  primary_score: 0.89000000000000001
+safety:
+  requires_human_review: false
+  risk_level: low
+status: draft
+task_family: generation
+version: 1.0.0
+

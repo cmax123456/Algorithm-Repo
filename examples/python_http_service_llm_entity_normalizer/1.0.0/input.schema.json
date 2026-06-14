@@ -1,0 +1,25 @@
+{
+  "title": "LLM Entity Normalizer Input",
+  "type": "object",
+  "required": [
+    "task_text",
+    "entities"
+  ],
+  "properties": {
+    "task_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 12000
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "minItems": 1,
+      "maxItems": 128
+    }
+  },
+  "additionalProperties": false
+}

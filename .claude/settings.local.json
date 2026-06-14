@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"f:/algorithm repo1/build/algolib.exe\" --help)",
+      "Bash(\"f:/algorithm repo1/build/algolib.exe\")",
+      "Bash(./build/algolib.exe)",
+      "Bash(./build/algolib.exe --help)",
+      "Bash(where cmake *)"
+    ]
+  }
+}
