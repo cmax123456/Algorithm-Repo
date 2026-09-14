@@ -141,46 +141,74 @@ Result<AlgorithmCard> ParseAlgorithmCard(const YAML::Node& root) {
         card.capabilities = capabilities_result.value();
     }
 
-    if (root["agent_card"] && root["agent_card"].IsMap()) {
-        const YAML::Node& agent_card_node = root["agent_card"];
-        if (agent_card_node["summary"]) {
-            card.agent_card.summary = agent_card_node["summary"].as<std::string>();
+    if (root["operational_functions"]) {
+        if (!root["operational_functions"].IsSequence()) {
+            return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                 "operational_functions must be an array.");
         }
-        if (agent_card_node["when_to_use"]) {
-            auto use_result = ReadStringList(agent_card_node["when_to_use"],
-                                             "agent_card.when_to_use");
+        for (const auto& function_node : root["operational_functions"]) {
+            if (!function_node.IsMap() || !function_node["function_id"] ||
+                !function_node["function_code"] || !function_node["function_name"]) {
+                return Status::Error(
+                    ErrorCode::kInvalidAlgorithmCard,
+                    "Each operational_functions item must contain function_id, "
+                    "function_code, and function_name.");
+            }
+            OperationalFunctionSpec function;
+            function.function_id = function_node["function_id"].as<std::string>();
+            function.function_code = function_node["function_code"].as<std::string>();
+            function.function_name = function_node["function_name"].as<std::string>();
+            if (function_node["role"]) {
+                function.role = function_node["role"].as<std::string>();
+            }
+            if (function_node["coverage_level"]) {
+                function.coverage_level =
+                    function_node["coverage_level"].as<std::string>();
+            }
+            card.operational_functions.push_back(std::move(function));
+        }
+    }
+
+    if (root["agent_view"] && root["agent_view"].IsMap()) {
+        const YAML::Node& agent_view_node = root["agent_view"];
+        if (agent_view_node["summary"]) {
+            card.agent_view.summary = agent_view_node["summary"].as<std::string>();
+        }
+        if (agent_view_node["when_to_use"]) {
+            auto use_result = ReadStringList(agent_view_node["when_to_use"],
+                                             "agent_view.when_to_use");
             if (!use_result.ok()) {
                 return use_result.status();
             }
-            card.agent_card.when_to_use = use_result.value();
+            card.agent_view.when_to_use = use_result.value();
         }
-        if (agent_card_node["when_not_to_use"]) {
+        if (agent_view_node["when_not_to_use"]) {
             auto not_use_result =
-                ReadStringList(agent_card_node["when_not_to_use"],
-                               "agent_card.when_not_to_use");
+                ReadStringList(agent_view_node["when_not_to_use"],
+                               "agent_view.when_not_to_use");
             if (!not_use_result.ok()) {
                 return not_use_result.status();
             }
-            card.agent_card.when_not_to_use = not_use_result.value();
+            card.agent_view.when_not_to_use = not_use_result.value();
         }
-        if (agent_card_node["input_description"]) {
-            card.agent_card.input_description =
-                agent_card_node["input_description"].as<std::string>();
+        if (agent_view_node["input_description"]) {
+            card.agent_view.input_description =
+                agent_view_node["input_description"].as<std::string>();
         }
-        if (agent_card_node["output_description"]) {
-            card.agent_card.output_description =
-                agent_card_node["output_description"].as<std::string>();
+        if (agent_view_node["output_description"]) {
+            card.agent_view.output_description =
+                agent_view_node["output_description"].as<std::string>();
         }
-        if (agent_card_node["examples"] && agent_card_node["examples"].IsSequence()) {
-            for (const auto& example_node : agent_card_node["examples"]) {
-                AgentCardExample example;
+        if (agent_view_node["examples"] && agent_view_node["examples"].IsSequence()) {
+            for (const auto& example_node : agent_view_node["examples"]) {
+                AgentViewExample example;
                 if (example_node["input"]) {
                     example.input = YamlUtils::YamlNodeToJson(example_node["input"]);
                 }
                 if (example_node["output"]) {
                     example.output = YamlUtils::YamlNodeToJson(example_node["output"]);
                 }
-                card.agent_card.examples.push_back(std::move(example));
+                card.agent_view.examples.push_back(std::move(example));
             }
         }
     }
@@ -194,6 +222,10 @@ Result<AlgorithmCard> ParseAlgorithmCard(const YAML::Node& root) {
         if (machine_spec_node["output_schema_ref"]) {
             card.machine_spec.output_schema_ref =
                 machine_spec_node["output_schema_ref"].as<std::string>();
+        }
+        if (machine_spec_node["tensor_contract_ref"]) {
+            card.machine_spec.tensor_contract_ref =
+                machine_spec_node["tensor_contract_ref"].as<std::string>();
         }
         if (machine_spec_node["runtime"] && machine_spec_node["runtime"].IsMap()) {
             const YAML::Node& runtime_node = machine_spec_node["runtime"];
@@ -308,32 +340,106 @@ Result<AlgorithmCard> ParseAlgorithmCard(const YAML::Node& root) {
         if (root["performance"]["primary_score"]) {
             performance.primary_score = root["performance"]["primary_score"].as<double>();
         }
+        if (root["performance"]["time_complexity"]) {
+            performance.time_complexity =
+                root["performance"]["time_complexity"].as<std::string>();
+        }
+        if (root["performance"]["space_complexity"]) {
+            performance.space_complexity =
+                root["performance"]["space_complexity"].as<std::string>();
+        }
+        if (root["performance"]["complexity_variable"]) {
+            performance.complexity_variable =
+                root["performance"]["complexity_variable"].as<std::string>();
+        }
+        if (root["performance"]["performance_notes"]) {
+            performance.performance_notes =
+                root["performance"]["performance_notes"].as<std::string>();
+        }
         card.performance = std::move(performance);
     }
 
-    if (root["hardware_requirements"] && root["hardware_requirements"].IsMap()) {
-        HardwareRequirementSpec hardware_requirements;
-        if (root["hardware_requirements"]["requires_gpu"]) {
-            hardware_requirements.requires_gpu =
-                root["hardware_requirements"]["requires_gpu"].as<bool>();
+    if (root["resource_requirements"] && root["resource_requirements"].IsMap()) {
+        ResourceRequirementsSpec resource_requirements;
+        if (root["resource_requirements"]["min_cpu_cores"]) {
+            resource_requirements.min_cpu_cores =
+                root["resource_requirements"]["min_cpu_cores"].as<int>();
         }
-        if (root["hardware_requirements"]["min_gpu_memory_mb"]) {
-            hardware_requirements.min_gpu_memory_mb =
-                root["hardware_requirements"]["min_gpu_memory_mb"].as<int>();
+        if (root["resource_requirements"]["recommended_cpu_cores"]) {
+            resource_requirements.recommended_cpu_cores =
+                root["resource_requirements"]["recommended_cpu_cores"].as<int>();
         }
-        if (root["hardware_requirements"]["min_system_memory_mb"]) {
-            hardware_requirements.min_system_memory_mb =
-                root["hardware_requirements"]["min_system_memory_mb"].as<int>();
+        if (root["resource_requirements"]["min_memory_mb"]) {
+            resource_requirements.min_memory_mb =
+                root["resource_requirements"]["min_memory_mb"].as<int>();
         }
-        if (root["hardware_requirements"]["min_cpu_cores"]) {
-            hardware_requirements.min_cpu_cores =
-                root["hardware_requirements"]["min_cpu_cores"].as<int>();
+        if (root["resource_requirements"]["recommended_memory_mb"]) {
+            resource_requirements.recommended_memory_mb =
+                root["resource_requirements"]["recommended_memory_mb"].as<int>();
         }
-        if (root["hardware_requirements"]["preferred_device"]) {
-            hardware_requirements.preferred_device =
-                root["hardware_requirements"]["preferred_device"].as<std::string>();
+        if (root["resource_requirements"]["min_gpu_count"]) {
+            resource_requirements.min_gpu_count =
+                root["resource_requirements"]["min_gpu_count"].as<int>();
         }
-        card.hardware_requirements = std::move(hardware_requirements);
+        if (root["resource_requirements"]["gpu_type"]) {
+            resource_requirements.gpu_type =
+                root["resource_requirements"]["gpu_type"].as<std::string>();
+        }
+        if (root["resource_requirements"]["min_vram_mb"]) {
+            resource_requirements.min_vram_mb =
+                root["resource_requirements"]["min_vram_mb"].as<int>();
+        }
+        if (root["resource_requirements"]["recommended_vram_mb"]) {
+            resource_requirements.recommended_vram_mb =
+                root["resource_requirements"]["recommended_vram_mb"].as<int>();
+        }
+        if (root["resource_requirements"]["disk_mb"]) {
+            resource_requirements.disk_mb =
+                root["resource_requirements"]["disk_mb"].as<int>();
+        }
+        card.resource_requirements = std::move(resource_requirements);
+    }
+
+    if (root["model_profile"] && root["model_profile"].IsMap()) {
+        ModelProfileSpec model_profile;
+        if (root["model_profile"]["parameter_count"]) {
+            model_profile.parameter_count =
+                root["model_profile"]["parameter_count"].as<long long>();
+        }
+        if (root["model_profile"]["parameter_count_text"]) {
+            model_profile.parameter_count_text =
+                root["model_profile"]["parameter_count_text"].as<std::string>();
+        }
+        if (root["model_profile"]["flops"]) {
+            model_profile.flops = root["model_profile"]["flops"].as<long long>();
+        }
+        if (root["model_profile"]["flops_text"]) {
+            model_profile.flops_text =
+                root["model_profile"]["flops_text"].as<std::string>();
+        }
+        if (root["model_profile"]["flops_input_shape"]) {
+            if (!root["model_profile"]["flops_input_shape"].IsSequence()) {
+                return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                     "model_profile.flops_input_shape must be an array.");
+            }
+            for (const auto& item : root["model_profile"]["flops_input_shape"]) {
+                if (!item.IsScalar()) {
+                    return Status::Error(
+                        ErrorCode::kInvalidAlgorithmCard,
+                        "model_profile.flops_input_shape must contain integer dimensions.");
+                }
+                model_profile.flops_input_shape.push_back(item.as<int>());
+            }
+        }
+        if (root["model_profile"]["model_size_mb"]) {
+            model_profile.model_size_mb =
+                root["model_profile"]["model_size_mb"].as<int>();
+        }
+        if (root["model_profile"]["precision"]) {
+            model_profile.precision =
+                root["model_profile"]["precision"].as<std::string>();
+        }
+        card.model_profile = std::move(model_profile);
     }
 
     if (root["safety"] && root["safety"].IsMap()) {
@@ -359,19 +465,19 @@ Status ValidateCommonFields(const AlgorithmCard& card) {
     status = AppendStatus(std::move(status), RequireNotEmpty(card.modalities.input, "modalities.input"));
     status = AppendStatus(std::move(status), RequireNotEmpty(card.modalities.output, "modalities.output"));
     status = AppendStatus(std::move(status), RequireNotEmpty(card.capabilities, "capabilities"));
-    status = AppendStatus(std::move(status), RequireNonEmpty(card.agent_card.summary, "agent_card.summary"));
+    status = AppendStatus(std::move(status), RequireNonEmpty(card.agent_view.summary, "agent_view.summary"));
     status = AppendStatus(std::move(status),
-                          RequireNotEmpty(card.agent_card.when_to_use,
-                                          "agent_card.when_to_use"));
+                          RequireNotEmpty(card.agent_view.when_to_use,
+                                          "agent_view.when_to_use"));
     status = AppendStatus(std::move(status),
-                          RequireNotEmpty(card.agent_card.when_not_to_use,
-                                          "agent_card.when_not_to_use"));
+                          RequireNotEmpty(card.agent_view.when_not_to_use,
+                                          "agent_view.when_not_to_use"));
     status = AppendStatus(std::move(status),
-                          RequireNonEmpty(card.agent_card.input_description,
-                                          "agent_card.input_description"));
+                          RequireNonEmpty(card.agent_view.input_description,
+                                          "agent_view.input_description"));
     status = AppendStatus(std::move(status),
-                          RequireNonEmpty(card.agent_card.output_description,
-                                          "agent_card.output_description"));
+                          RequireNonEmpty(card.agent_view.output_description,
+                                          "agent_view.output_description"));
     status = AppendStatus(std::move(status),
                           RequireNonEmpty(card.machine_spec.input_schema_ref,
                                           "machine_spec.input_schema_ref"));
@@ -442,6 +548,15 @@ Status ValidateBackendSpecificFields(const AlgorithmCard& card,
                                                               card.machine_spec.postprocess->config_uri),
                                   ErrorCode::kPostprocessFailed,
                                   "machine_spec.postprocess.config_uri"));
+            if (!card.machine_spec.tensor_contract_ref.empty()) {
+                status = AppendStatus(
+                    std::move(status),
+                    RequireFileExists(FileUtils::ResolveReference(
+                                          package_root,
+                                          card.machine_spec.tensor_contract_ref),
+                                      ErrorCode::kInvalidAlgorithmCard,
+                                      "machine_spec.tensor_contract_ref"));
+            }
             if (card.machine_spec.tokenizer.has_value() &&
                 !card.machine_spec.tokenizer->tokenizer_uri.empty()) {
                 status = AppendStatus(

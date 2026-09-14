@@ -49,7 +49,7 @@ std::string ReadRequiredString(const json& node, const char* field_name) {
     return node.at(field_name).get<std::string>();
 }
 
-json BuildAgentCardExampleJson(const AgentCardExample& example) {
+json BuildAgentViewExampleJson(const AgentViewExample& example) {
     return json{
         {"input", example.input},
         {"output", example.output},
@@ -104,22 +104,35 @@ json ToJson(const AlgorithmCard& card) {
         {"output", card.modalities.output},
     };
     card_json["capabilities"] = card.capabilities;
-
-    json agent_card_json;
-    agent_card_json["summary"] = card.agent_card.summary;
-    agent_card_json["when_to_use"] = card.agent_card.when_to_use;
-    agent_card_json["when_not_to_use"] = card.agent_card.when_not_to_use;
-    agent_card_json["input_description"] = card.agent_card.input_description;
-    agent_card_json["output_description"] = card.agent_card.output_description;
-    agent_card_json["examples"] = json::array();
-    for (const auto& example : card.agent_card.examples) {
-        agent_card_json["examples"].push_back(BuildAgentCardExampleJson(example));
+    card_json["operational_functions"] = json::array();
+    for (const auto& function : card.operational_functions) {
+        card_json["operational_functions"].push_back({
+            {"function_id", function.function_id},
+            {"function_code", function.function_code},
+            {"function_name", function.function_name},
+            {"role", function.role},
+            {"coverage_level", function.coverage_level},
+        });
     }
-    card_json["agent_card"] = std::move(agent_card_json);
+
+    json agent_view_json;
+    agent_view_json["summary"] = card.agent_view.summary;
+    agent_view_json["when_to_use"] = card.agent_view.when_to_use;
+    agent_view_json["when_not_to_use"] = card.agent_view.when_not_to_use;
+    agent_view_json["input_description"] = card.agent_view.input_description;
+    agent_view_json["output_description"] = card.agent_view.output_description;
+    agent_view_json["examples"] = json::array();
+    for (const auto& example : card.agent_view.examples) {
+        agent_view_json["examples"].push_back(BuildAgentViewExampleJson(example));
+    }
+    card_json["agent_view"] = std::move(agent_view_json);
 
     json machine_spec_json;
     machine_spec_json["input_schema_ref"] = card.machine_spec.input_schema_ref;
     machine_spec_json["output_schema_ref"] = card.machine_spec.output_schema_ref;
+    if (!card.machine_spec.tensor_contract_ref.empty()) {
+        machine_spec_json["tensor_contract_ref"] = card.machine_spec.tensor_contract_ref;
+    }
     machine_spec_json["runtime"] = {
         {"backend_type", ToString(card.machine_spec.runtime.backend_type)},
         {"model_uri", card.machine_spec.runtime.model_uri},
@@ -171,21 +184,47 @@ json ToJson(const AlgorithmCard& card) {
         WriteOptional(performance_json, "latency_ms_p95", card.performance->latency_ms_p95);
         performance_json["primary_metric"] = card.performance->primary_metric;
         WriteOptional(performance_json, "primary_score", card.performance->primary_score);
+        performance_json["time_complexity"] = card.performance->time_complexity;
+        performance_json["space_complexity"] = card.performance->space_complexity;
+        performance_json["complexity_variable"] = card.performance->complexity_variable;
+        performance_json["performance_notes"] = card.performance->performance_notes;
         card_json["performance"] = std::move(performance_json);
     }
 
-    if (card.hardware_requirements.has_value()) {
-        json hardware_json;
-        WriteOptional(hardware_json, "requires_gpu",
-                      card.hardware_requirements->requires_gpu);
-        WriteOptional(hardware_json, "min_gpu_memory_mb",
-                      card.hardware_requirements->min_gpu_memory_mb);
-        WriteOptional(hardware_json, "min_system_memory_mb",
-                      card.hardware_requirements->min_system_memory_mb);
-        WriteOptional(hardware_json, "min_cpu_cores",
-                      card.hardware_requirements->min_cpu_cores);
-        hardware_json["preferred_device"] = card.hardware_requirements->preferred_device;
-        card_json["hardware_requirements"] = std::move(hardware_json);
+    if (card.resource_requirements.has_value()) {
+        json resource_json;
+        WriteOptional(resource_json, "min_cpu_cores",
+                      card.resource_requirements->min_cpu_cores);
+        WriteOptional(resource_json, "recommended_cpu_cores",
+                      card.resource_requirements->recommended_cpu_cores);
+        WriteOptional(resource_json, "min_memory_mb",
+                      card.resource_requirements->min_memory_mb);
+        WriteOptional(resource_json, "recommended_memory_mb",
+                      card.resource_requirements->recommended_memory_mb);
+        WriteOptional(resource_json, "min_gpu_count",
+                      card.resource_requirements->min_gpu_count);
+        resource_json["gpu_type"] = card.resource_requirements->gpu_type;
+        WriteOptional(resource_json, "min_vram_mb",
+                      card.resource_requirements->min_vram_mb);
+        WriteOptional(resource_json, "recommended_vram_mb",
+                      card.resource_requirements->recommended_vram_mb);
+        WriteOptional(resource_json, "disk_mb", card.resource_requirements->disk_mb);
+        card_json["resource_requirements"] = std::move(resource_json);
+    }
+
+    if (card.model_profile.has_value()) {
+        json model_profile_json;
+        WriteOptional(model_profile_json, "parameter_count",
+                      card.model_profile->parameter_count);
+        model_profile_json["parameter_count_text"] =
+            card.model_profile->parameter_count_text;
+        WriteOptional(model_profile_json, "flops", card.model_profile->flops);
+        model_profile_json["flops_text"] = card.model_profile->flops_text;
+        model_profile_json["flops_input_shape"] = card.model_profile->flops_input_shape;
+        WriteOptional(model_profile_json, "model_size_mb",
+                      card.model_profile->model_size_mb);
+        model_profile_json["precision"] = card.model_profile->precision;
+        card_json["model_profile"] = std::move(model_profile_json);
     }
 
     if (card.safety.has_value()) {
@@ -226,33 +265,54 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
         card.modalities.input = ReadStringArray(json_value.at("modalities"), "input");
         card.modalities.output = ReadStringArray(json_value.at("modalities"), "output");
         card.capabilities = ReadStringArray(json_value, "capabilities");
-
-        if (!json_value.contains("agent_card") || !json_value.at("agent_card").is_object()) {
-            return Status::Error(ErrorCode::kInvalidAlgorithmCard,
-                                 "agent_card must be an object.");
-        }
-        const json& agent_card_json = json_value.at("agent_card");
-        card.agent_card.summary = ReadRequiredString(agent_card_json, "summary");
-        card.agent_card.when_to_use = ReadStringArray(agent_card_json, "when_to_use");
-        card.agent_card.when_not_to_use = ReadStringArray(agent_card_json, "when_not_to_use");
-        card.agent_card.input_description =
-            ReadRequiredString(agent_card_json, "input_description");
-        card.agent_card.output_description =
-            ReadRequiredString(agent_card_json, "output_description");
-        if (agent_card_json.contains("examples")) {
-            if (!agent_card_json.at("examples").is_array()) {
+        if (json_value.contains("operational_functions")) {
+            if (!json_value.at("operational_functions").is_array()) {
                 return Status::Error(ErrorCode::kInvalidAlgorithmCard,
-                                     "agent_card.examples must be an array.");
+                                     "operational_functions must be an array.");
             }
-            for (const auto& example_json : agent_card_json.at("examples")) {
+            for (const auto& function_json : json_value.at("operational_functions")) {
+                if (!function_json.is_object()) {
+                    return Status::Error(
+                        ErrorCode::kInvalidAlgorithmCard,
+                        "operational_functions items must be objects.");
+                }
+                OperationalFunctionSpec function;
+                function.function_id = ReadRequiredString(function_json, "function_id");
+                function.function_code = ReadRequiredString(function_json, "function_code");
+                function.function_name = ReadRequiredString(function_json, "function_name");
+                function.role = function_json.value("role", std::string("primary"));
+                function.coverage_level =
+                    function_json.value("coverage_level", std::string("full"));
+                card.operational_functions.push_back(std::move(function));
+            }
+        }
+
+        if (!json_value.contains("agent_view") || !json_value.at("agent_view").is_object()) {
+            return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                 "agent_view must be an object.");
+        }
+        const json& agent_view_json = json_value.at("agent_view");
+        card.agent_view.summary = ReadRequiredString(agent_view_json, "summary");
+        card.agent_view.when_to_use = ReadStringArray(agent_view_json, "when_to_use");
+        card.agent_view.when_not_to_use = ReadStringArray(agent_view_json, "when_not_to_use");
+        card.agent_view.input_description =
+            ReadRequiredString(agent_view_json, "input_description");
+        card.agent_view.output_description =
+            ReadRequiredString(agent_view_json, "output_description");
+        if (agent_view_json.contains("examples")) {
+            if (!agent_view_json.at("examples").is_array()) {
+                return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                     "agent_view.examples must be an array.");
+            }
+            for (const auto& example_json : agent_view_json.at("examples")) {
                 if (!example_json.is_object()) {
                     return Status::Error(ErrorCode::kInvalidAlgorithmCard,
-                                         "agent_card.examples items must be objects.");
+                                         "agent_view.examples items must be objects.");
                 }
-                AgentCardExample example;
+                AgentViewExample example;
                 example.input = example_json.value("input", json::object());
                 example.output = example_json.value("output", json::object());
-                card.agent_card.examples.push_back(std::move(example));
+                card.agent_view.examples.push_back(std::move(example));
             }
         }
 
@@ -265,6 +325,8 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
             ReadRequiredString(machine_spec_json, "input_schema_ref");
         card.machine_spec.output_schema_ref =
             ReadRequiredString(machine_spec_json, "output_schema_ref");
+        card.machine_spec.tensor_contract_ref =
+            machine_spec_json.value("tensor_contract_ref", std::string());
 
         if (!machine_spec_json.contains("runtime") || !machine_spec_json.at("runtime").is_object()) {
             return Status::Error(ErrorCode::kInvalidAlgorithmCard,
@@ -277,14 +339,16 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
             return runtime_backend_result.status();
         }
         card.machine_spec.runtime.backend_type = runtime_backend_result.value();
-        card.machine_spec.runtime.model_uri = runtime_json.value("model_uri", "");
+        card.machine_spec.runtime.model_uri =
+            runtime_json.value("model_uri", std::string());
         card.machine_spec.runtime.execution_provider =
-            runtime_json.value("execution_provider", "");
-        card.machine_spec.runtime.endpoint = runtime_json.value("endpoint", "");
+            runtime_json.value("execution_provider", std::string());
+        card.machine_spec.runtime.endpoint =
+            runtime_json.value("endpoint", std::string());
         card.machine_spec.runtime.health_endpoint =
-            runtime_json.value("health_endpoint", "");
+            runtime_json.value("health_endpoint", std::string());
         card.machine_spec.runtime.metadata_endpoint =
-            runtime_json.value("metadata_endpoint", "");
+            runtime_json.value("metadata_endpoint", std::string());
         card.machine_spec.runtime.timeout_ms = runtime_json.value("timeout_ms", 0);
 
         if (machine_spec_json.contains("tokenizer")) {
@@ -294,8 +358,9 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
                                      "machine_spec.tokenizer must be an object.");
             }
             TokenizerSpec tokenizer;
-            tokenizer.type = tokenizer_json.value("type", "");
-            tokenizer.tokenizer_uri = tokenizer_json.value("tokenizer_uri", "");
+            tokenizer.type = tokenizer_json.value("type", std::string());
+            tokenizer.tokenizer_uri =
+                tokenizer_json.value("tokenizer_uri", std::string());
             tokenizer.max_length = ReadOptional<int>(tokenizer_json, "max_length");
             card.machine_spec.tokenizer = std::move(tokenizer);
         }
@@ -307,8 +372,10 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
                                      "machine_spec.preprocess must be an object.");
             }
             ProcessSpec preprocess;
-            preprocess.config_uri = preprocess_json.value("config_uri", "");
-            preprocess.label_map_uri = preprocess_json.value("label_map_uri", "");
+            preprocess.config_uri =
+                preprocess_json.value("config_uri", std::string());
+            preprocess.label_map_uri =
+                preprocess_json.value("label_map_uri", std::string());
             card.machine_spec.preprocess = std::move(preprocess);
         }
 
@@ -319,8 +386,10 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
                                      "machine_spec.postprocess must be an object.");
             }
             ProcessSpec postprocess;
-            postprocess.config_uri = postprocess_json.value("config_uri", "");
-            postprocess.label_map_uri = postprocess_json.value("label_map_uri", "");
+            postprocess.config_uri =
+                postprocess_json.value("config_uri", std::string());
+            postprocess.label_map_uri =
+                postprocess_json.value("label_map_uri", std::string());
             card.machine_spec.postprocess = std::move(postprocess);
         }
 
@@ -352,29 +421,68 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
                 ReadOptional<int>(performance_json, "latency_ms_p50");
             performance.latency_ms_p95 =
                 ReadOptional<int>(performance_json, "latency_ms_p95");
-            performance.primary_metric = performance_json.value("primary_metric", "");
+            performance.primary_metric =
+                performance_json.value("primary_metric", std::string());
             performance.primary_score = ReadOptional<double>(performance_json, "primary_score");
+            performance.time_complexity =
+                performance_json.value("time_complexity", std::string());
+            performance.space_complexity =
+                performance_json.value("space_complexity", std::string());
+            performance.complexity_variable =
+                performance_json.value("complexity_variable", std::string());
+            performance.performance_notes =
+                performance_json.value("performance_notes", std::string());
             card.performance = std::move(performance);
         }
 
-        if (json_value.contains("hardware_requirements")) {
-            const json& hardware_json = json_value.at("hardware_requirements");
-            if (!hardware_json.is_object()) {
+        if (json_value.contains("resource_requirements")) {
+            const json& resource_json = json_value.at("resource_requirements");
+            if (!resource_json.is_object()) {
                 return Status::Error(ErrorCode::kInvalidAlgorithmCard,
-                                     "hardware_requirements must be an object.");
+                                     "resource_requirements must be an object.");
             }
-            HardwareRequirementSpec hardware_requirements;
-            hardware_requirements.requires_gpu =
-                ReadOptional<bool>(hardware_json, "requires_gpu");
-            hardware_requirements.min_gpu_memory_mb =
-                ReadOptional<int>(hardware_json, "min_gpu_memory_mb");
-            hardware_requirements.min_system_memory_mb =
-                ReadOptional<int>(hardware_json, "min_system_memory_mb");
-            hardware_requirements.min_cpu_cores =
-                ReadOptional<int>(hardware_json, "min_cpu_cores");
-            hardware_requirements.preferred_device =
-                hardware_json.value("preferred_device", "");
-            card.hardware_requirements = std::move(hardware_requirements);
+            ResourceRequirementsSpec resource_requirements;
+            resource_requirements.min_cpu_cores =
+                ReadOptional<int>(resource_json, "min_cpu_cores");
+            resource_requirements.recommended_cpu_cores =
+                ReadOptional<int>(resource_json, "recommended_cpu_cores");
+            resource_requirements.min_memory_mb =
+                ReadOptional<int>(resource_json, "min_memory_mb");
+            resource_requirements.recommended_memory_mb =
+                ReadOptional<int>(resource_json, "recommended_memory_mb");
+            resource_requirements.min_gpu_count =
+                ReadOptional<int>(resource_json, "min_gpu_count");
+            resource_requirements.gpu_type =
+                resource_json.value("gpu_type", std::string());
+            resource_requirements.min_vram_mb =
+                ReadOptional<int>(resource_json, "min_vram_mb");
+            resource_requirements.recommended_vram_mb =
+                ReadOptional<int>(resource_json, "recommended_vram_mb");
+            resource_requirements.disk_mb = ReadOptional<int>(resource_json, "disk_mb");
+            card.resource_requirements = std::move(resource_requirements);
+        }
+
+        if (json_value.contains("model_profile")) {
+            const json& model_profile_json = json_value.at("model_profile");
+            if (!model_profile_json.is_object()) {
+                return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                     "model_profile must be an object.");
+            }
+            ModelProfileSpec model_profile;
+            model_profile.parameter_count =
+                ReadOptional<long long>(model_profile_json, "parameter_count");
+            model_profile.parameter_count_text =
+                model_profile_json.value("parameter_count_text", std::string());
+            model_profile.flops = ReadOptional<long long>(model_profile_json, "flops");
+            model_profile.flops_text =
+                model_profile_json.value("flops_text", std::string());
+            model_profile.flops_input_shape =
+                model_profile_json.value("flops_input_shape", std::vector<int>{});
+            model_profile.model_size_mb =
+                ReadOptional<int>(model_profile_json, "model_size_mb");
+            model_profile.precision =
+                model_profile_json.value("precision", std::string());
+            card.model_profile = std::move(model_profile);
         }
 
         if (json_value.contains("safety")) {
@@ -384,7 +492,7 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
                                      "safety must be an object.");
             }
             SafetySpec safety;
-            safety.risk_level = safety_json.value("risk_level", "");
+            safety.risk_level = safety_json.value("risk_level", std::string());
             safety.requires_human_review =
                 ReadOptional<bool>(safety_json, "requires_human_review");
             card.safety = std::move(safety);

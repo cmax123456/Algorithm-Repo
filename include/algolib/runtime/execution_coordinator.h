@@ -7,6 +7,7 @@
 #include "algolib/runtime/algorithm_result.h"
 #include "algolib/runtime/execution_logger.h"
 #include "algolib/runtime/runtime_factory.h"
+#include "algolib/runtime/runtime_runner_cache.h"
 
 namespace algolib {
 
@@ -14,16 +15,17 @@ namespace algolib {
 class ExecutionCoordinator {
 public:
     explicit ExecutionCoordinator(const AlgorithmRegistry& registry,
-                                  std::filesystem::path execution_log_path = {});
+                                  std::filesystem::path execution_log_path = {},
+                                  RuntimeRunnerCache* runner_cache = nullptr);
 
     AlgorithmResult Run(const AlgorithmRequest& request);
-    AlgorithmResult RouteForAgent(const AgentRoutingRequest& request);
     const std::filesystem::path& execution_log_path() const;
 
 private:
     const AlgorithmRegistry& registry_;
     RuntimeFactory runtime_factory_;
     ExecutionLogger execution_logger_;
+    RuntimeRunnerCache* runner_cache_ = nullptr;
 };
 
 }  // namespace algolib

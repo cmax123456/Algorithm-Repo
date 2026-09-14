@@ -113,9 +113,13 @@ add_library(
     src/runtime/execution_logger.cpp
     src/runtime/onnx_pipeline.cpp
     src/runtime/python_http_runner.cpp
+    src/runtime/python_http_runner_pool.cpp
     src/runtime/runtime_factory.cpp
+    src/runtime/runtime_runner_cache.cpp
+    src/runtime/model_loader.cpp
     src/runtime/onnx_runner.cpp
     src/runtime/onnx_session.cpp
+    src/server/http_server.cpp
     src/validation/algorithm_card_validator.cpp
     src/validation/golden_case_runner.cpp
     src/validation/onnx_package_validator.cpp
@@ -157,6 +161,10 @@ endfunction()
 
 algolib_copy_onnxruntime_dll_if_needed(algolib_cli)
 
+add_executable(algolib_server src/server/main.cpp)
+target_link_libraries(algolib_server PRIVATE algolib)
+algolib_copy_onnxruntime_dll_if_needed(algolib_server)
+
 if(ALGOLIB_BUILD_TESTS)
     enable_testing()
 
@@ -166,8 +174,9 @@ if(ALGOLIB_BUILD_TESTS)
         tests/algorithm_registry_tests.cpp
         tests/onnx_phase4_tests.cpp
         tests/phase5_execution_tests.cpp
-        tests/agent_routing_tests.cpp
+        tests/http_server_tests.cpp
         tests/python_service_validator_tests.cpp
+        tests/python_runner_pool_tests.cpp
         tests/schema_validator_tests.cpp
     )
     target_link_libraries(
@@ -186,3 +195,14 @@ if(ALGOLIB_BUILD_TESTS)
 
     add_test(NAME algolib_tests COMMAND algolib_tests)
 endif()
+
+# 中文注释：四类接口功能 Demo 程序，演示 Registry / Load / FileServing / PythonPool 接口。
+# 输出报告写入 <source_root>/demo/demo_output.json
+add_executable(algolib_demo demo/demo_main.cpp)
+target_link_libraries(algolib_demo PRIVATE algolib cpp_httplib_interface)
+target_compile_definitions(
+    algolib_demo
+    PRIVATE
+        ALGOLIB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+algolib_copy_onnxruntime_dll_if_needed(algolib_demo)

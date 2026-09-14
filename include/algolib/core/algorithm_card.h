@@ -12,7 +12,7 @@
 namespace algolib {
 
 // 中文注释: 保留示例输入输出 便于后续文档展示或 Agent 视图扩展
-struct AgentCardExample {
+struct AgentViewExample {
     nlohmann::json input;
     nlohmann::json output;
 };
@@ -22,13 +22,13 @@ struct Modalities {
     std::vector<std::string> output;
 };
 
-struct AgentCard {
+struct AgentView {
     std::string summary;
     std::vector<std::string> when_to_use;
     std::vector<std::string> when_not_to_use;
     std::string input_description;
     std::string output_description;
-    std::vector<AgentCardExample> examples;
+    std::vector<AgentViewExample> examples;
 };
 
 struct RuntimeSpec {
@@ -55,6 +55,8 @@ struct ProcessSpec {
 struct MachineSpec {
     std::string input_schema_ref;
     std::string output_schema_ref;
+    // 中文注释：可选 ONNX tensor 契约文件，用于声明模型真实输入/输出 tensor 签名。
+    std::string tensor_contract_ref;
     RuntimeSpec runtime;
     std::optional<TokenizerSpec> tokenizer;
     std::optional<ProcessSpec> preprocess;
@@ -73,19 +75,48 @@ struct PerformanceSpec {
     std::optional<int> latency_ms_p95;
     std::string primary_metric;
     std::optional<double> primary_score;
+    std::string time_complexity;
+    std::string space_complexity;
+    // 中文注释：说明 time_complexity / space_complexity 中变量的业务含义，例如 n 表示 token 数。
+    std::string complexity_variable;
+    std::string performance_notes;
 };
 
-struct HardwareRequirementSpec {
-    std::optional<bool> requires_gpu;
-    std::optional<int> min_gpu_memory_mb;
-    std::optional<int> min_system_memory_mb;
+struct ResourceRequirementsSpec {
     std::optional<int> min_cpu_cores;
-    std::string preferred_device;
+    std::optional<int> recommended_cpu_cores;
+    std::optional<int> min_memory_mb;
+    std::optional<int> recommended_memory_mb;
+    std::optional<int> min_gpu_count;
+    std::string gpu_type;
+    std::optional<int> min_vram_mb;
+    std::optional<int> recommended_vram_mb;
+    std::optional<int> disk_mb;
+};
+
+struct ModelProfileSpec {
+    std::optional<long long> parameter_count;
+    std::string parameter_count_text;
+    std::optional<long long> flops;
+    std::string flops_text;
+    std::vector<int> flops_input_shape;
+    std::optional<int> model_size_mb;
+    std::string precision;
 };
 
 struct SafetySpec {
     std::string risk_level;
     std::optional<bool> requires_human_review;
+};
+
+// A business/operational function implemented by this algorithm. This metadata is
+// optional so existing cards and callers remain compatible.
+struct OperationalFunctionSpec {
+    std::string function_id;
+    std::string function_code;
+    std::string function_name;
+    std::string role = "primary";
+    std::string coverage_level = "full";
 };
 
 // 中文注释: AlgorithmCard 与 SPEC 顶层字段一一对应
@@ -98,11 +129,13 @@ struct AlgorithmCard {
     std::string task_family;
     Modalities modalities;
     std::vector<std::string> capabilities;
-    AgentCard agent_card;
+    std::vector<OperationalFunctionSpec> operational_functions;
+    AgentView agent_view;
     MachineSpec machine_spec;
     std::optional<ConstraintsSpec> constraints;
     std::optional<PerformanceSpec> performance;
-    std::optional<HardwareRequirementSpec> hardware_requirements;
+    std::optional<ResourceRequirementsSpec> resource_requirements;
+    std::optional<ModelProfileSpec> model_profile;
     std::optional<SafetySpec> safety;
 };
 

@@ -1,6 +1,6 @@
 algorithm_id: onnx_text_classifier
 version: 1.0.0
-display_name: ONNX Text Classifier
+display_name: ONNX Text Classification Contract Fixture
 backend_type: onnx
 status: draft
 
@@ -15,15 +15,23 @@ capabilities:
   - text_classification
   - confidence_score
 
-agent_card:
+operational_functions:
+  - function_id: KC-06
+    function_code: classify
+    function_name: Classify
+    role: supporting
+    coverage_level: partial
+
+agent_view:
   summary: >
-    Classify a short text into a fixed label set and return confidence.
+    Exercise the text-tokenization, ONNX Runtime, and classification-postprocess
+    integration contract with a deterministic constant-logit fixture.
   when_to_use:
-    - Input is a short text string
-    - Output must be a fixed label
+    - The ONNX text-classification integration path must be tested
+    - Registry and runtime behavior need a deterministic fixture
   when_not_to_use:
-    - Long document reasoning is required
-    - Natural language explanation is required
+    - A trained semantic text classifier is required
+    - Accuracy or production model quality is being evaluated
   input_description: >
     The request JSON must contain a text field.
   output_description: >
@@ -38,6 +46,7 @@ agent_card:
 machine_spec:
   input_schema_ref: input.schema.json
   output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
   runtime:
     backend_type: onnx
     model_uri: model.onnx
@@ -61,8 +70,34 @@ constraints:
 performance:
   latency_ms_p50: 20
   latency_ms_p95: 60
-  primary_metric: accuracy
-  primary_score: 0.92
+  primary_metric: golden_contract_correctness
+  primary_score: 1.0
+  time_complexity: O(n)
+  space_complexity: O(n)
+  complexity_variable: n = number of input tokens after preprocessing
+  performance_notes: >
+    End-to-end runtime grows roughly linearly with token count under the current
+    text_tokenization plus classification pipeline.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 512
+  recommended_memory_mb: 1024
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 64
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: constant_logit_contract_fixture
+  flops: 0
+  flops_text: constant_output
+  flops_input_shape: [1, 256]
+  model_size_mb: 0
+  precision: fp32
 
 safety:
   risk_level: low

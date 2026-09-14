@@ -1,43 +1,38 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
-#include <optional>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
-#include "algolib/core/algorithm_card.h"
 #include "algolib/io/file_utils.h"
 #include "algolib/io/json_utils.h"
-#include "algolib/io/yaml_utils.h"
 #include "algolib/registry/algorithm_registry.h"
 #include "algolib/runtime/algorithm_request.h"
 #include "algolib/runtime/execution_coordinator.h"
+#include "algolib/runtime/model_loader.h"
+#include "algolib/runtime/runtime_factory.h"
+#include "algolib/runtime/runtime_runner_cache.h"
 
 namespace {
 
-using algolib::AgentRoutingRequestFromJson;
-using algolib::AlgorithmCard;
-using algolib::AlgorithmCardFromJson;
 using algolib::AlgorithmEntry;
 using algolib::AlgorithmKey;
+using algolib::AlgorithmQueryFilter;
 using algolib::AlgorithmRegistry;
 using algolib::AlgorithmRequestFromJson;
 using algolib::ExecutionCoordinator;
 using algolib::FileUtils;
 using algolib::JsonUtils;
+using algolib::ModelLoadRequest;
+using algolib::ModelLoader;
+using algolib::ParseAlgorithmStatus;
 using algolib::ParseBackendType;
-using algolib::Result;
+using algolib::RuntimeFactory;
+using algolib::RuntimeRunnerCache;
 using algolib::Status;
-using algolib::YamlUtils;
-
-struct LoadedCard {
-    std::filesystem::path card_path;
-    AlgorithmCard card;
-};
 
 std::filesystem::path ResolveRegistryPath() {
     if (const char* env_value = std::getenv("ALGOLIB_REGISTRY_PATH"); env_value != nullptr) {
@@ -47,20 +42,31 @@ std::filesystem::path ResolveRegistryPath() {
 }
 
 void PrintUsage() {
-    std::cout << "algolib register <package_or_card_path>\n"
-              << "algolib validate <algorithm_id> <version> <backend_type>\n"
-              << "algolib activate <algorithm_id> <version> <backend_type>\n"
-              << "algolib disable <algorithm_id> <version> <backend_type>\n"
-              << "algolib delete <algorithm_id> <version> <backend_type>\n"
-              << "algolib list\n"
-              << "algolib list-agent\n"
-              << "algolib show-card <algorithm_id> <version> <backend_type>\n"
-              << "algolib run <request_json_path>\n"
-              << "algolib agent-run <routing_request_json_path>\n"
-              << "algolib agent-template <algorithm_id> <version> <backend_type>\n"
-              << "algolib configure-service <package_or_card_path> <base_url>\n"
-              << "algolib register-activate <package_or_card_path>\n"
-              << "algolib bootstrap-service <package_or_card_path> <base_url>\n";
+    std::cout
+        << "algolib register <package_or_card_path>\n"
+        << "algolib validate <algorithm_id> <version> <backend_type>\n"
+        << "algolib activate <algorithm_id> <version> <backend_type>\n"
+        << "algolib disable <algorithm_id> <version> <backend_type>\n"
+        << "algolib delete <algorithm_id> <version> <backend_type>\n"
+        << "algolib load <algorithm_id> <version> <backend_type> [<deploy_id>]\n"
+        << "algolib unload <algorithm_id> <version> <backend_type> [<deploy_id>]\n"
+        << "algolib list [OPTIONS]\n"
+        << "  --active-only=<true|false>    默认 true；false 时返回所有非 deleted 条目\n"
+        << "  --status=<draft|validated|active|disabled>\n"
+        << "                               仅 active-only=false 时生效\n"
+        << "  --task-family=<string>        精确匹配 task_family 字段\n"
+        << "  --backend=<onnx|python_http_service>\n"
+        << "  --capability=<string>        capabilities 列表中包含该值\n"
+        << "  --node=<node_id>             deployments 中至少有一个 node_id 等于该值\n"
+        << "  --max-vram=<MB>              筛选 min_vram_mb <= max-vram 的模型\n"
+        << "  --max-memory=<MB>            筛选 min_memory_mb <= max-memory 的模型\n"
+        << "  --max-cpu-cores=<n>          筛选 min_cpu_cores <= max-cpu-cores 的模型\n"
+        << "algolib show-card <algorithm_id> <version> <backend_type>\n"
+        << "algolib run <request_json_path>\n"
+        << "algolib deploy <algorithm_id> <version> <backend_type> <deploy_spec_json_path>\n"
+        << "algolib undeploy <algorithm_id> <version> <backend_type> <deploy_id>\n"
+        << "algolib deploy-status <algorithm_id> <version> <backend_type> <deploy_id>"
+           " <loading|ready|error|unloaded> [status_message] [updated_at]\n";
 }
 
 nlohmann::json BuildEntrySummary(const AlgorithmEntry& entry) {
@@ -71,6 +77,9 @@ nlohmann::json BuildEntrySummary(const AlgorithmEntry& entry) {
         {"status", algolib::ToString(entry.status)},
         {"display_name", entry.card.display_name},
         {"task_family", entry.card.task_family},
+        {"operational_functions",
+         algolib::ToJson(entry.card).value("operational_functions",
+                                            nlohmann::json::array())},
     };
 }
 
@@ -103,222 +112,6 @@ int PrintStatusError(const Status& status) {
 
 void PrintJson(const nlohmann::json& payload) {
     std::cout << JsonUtils::Pretty(payload) << std::endl;
-}
-
-std::string TrimTrailingSlash(std::string value) {
-    while (!value.empty() && value.back() == '/') {
-        value.pop_back();
-    }
-    return value;
-}
-
-Result<LoadedCard> LoadCardForEditing(const std::filesystem::path& package_or_card_path) {
-    auto card_path_result = FileUtils::ResolveCardPath(package_or_card_path);
-    if (!card_path_result.ok()) {
-        return card_path_result.status();
-    }
-
-    auto yaml_result = YamlUtils::LoadYamlFile(card_path_result.value());
-    if (!yaml_result.ok()) {
-        return yaml_result.status();
-    }
-
-    auto card_result = AlgorithmCardFromJson(YamlUtils::YamlNodeToJson(yaml_result.value()));
-    if (!card_result.ok()) {
-        return card_result.status();
-    }
-
-    return LoadedCard{card_path_result.value(), card_result.value()};
-}
-
-Status SaveCard(const LoadedCard& loaded_card) {
-    return FileUtils::WriteTextFile(loaded_card.card_path,
-                                    algolib::ToYamlString(loaded_card.card));
-}
-
-Status ConfigurePythonServiceBaseUrl(LoadedCard* loaded_card, const std::string& base_url) {
-    if (loaded_card->card.backend_type != algolib::BackendType::kPythonHttpService) {
-        return Status::Error(algolib::ErrorCode::kBackendTypeMismatch,
-                             "configure-service only supports python_http_service cards.");
-    }
-
-    const std::string normalized_base_url = TrimTrailingSlash(base_url);
-    if (normalized_base_url.empty() || normalized_base_url.rfind("http://", 0) != 0) {
-        return Status::Error(algolib::ErrorCode::kInvalidArgument,
-                             "base_url must start with http:// and include host:port.");
-    }
-
-    loaded_card->card.machine_spec.runtime.endpoint = normalized_base_url + "/predict";
-    loaded_card->card.machine_spec.runtime.health_endpoint = normalized_base_url + "/health";
-    loaded_card->card.machine_spec.runtime.metadata_endpoint = normalized_base_url + "/metadata";
-    return Status::Ok();
-}
-
-std::optional<int> TryExtractPort(const std::string& base_url) {
-    const std::string normalized = TrimTrailingSlash(base_url);
-    if (normalized.rfind("http://", 0) != 0) {
-        return std::nullopt;
-    }
-    const std::string host_port = normalized.substr(std::string("http://").size());
-    const std::size_t colon_pos = host_port.rfind(':');
-    if (colon_pos == std::string::npos || colon_pos + 1 >= host_port.size()) {
-        return std::nullopt;
-    }
-    try {
-        return std::stoi(host_port.substr(colon_pos + 1));
-    } catch (...) {
-        return std::nullopt;
-    }
-}
-
-std::optional<std::string> BuildLocalStartCommand(const LoadedCard& loaded_card,
-                                                  const std::string& base_url) {
-    const auto service_script = loaded_card.card_path.parent_path() / "service.py";
-    if (!std::filesystem::exists(service_script)) {
-        return std::nullopt;
-    }
-
-    const auto port = TryExtractPort(base_url);
-    if (!port.has_value()) {
-        return std::string("python3 ") + service_script.generic_string();
-    }
-
-    return std::string("python3 ") + service_script.generic_string() +
-           " --host 127.0.0.1 --port " + std::to_string(port.value());
-}
-
-int EstimateStringChars(const nlohmann::json& value) {
-    if (value.is_string()) {
-        return static_cast<int>(value.get_ref<const std::string&>().size());
-    }
-    if (value.is_array()) {
-        int total = 0;
-        for (const auto& item : value) {
-            total += EstimateStringChars(item);
-        }
-        return total;
-    }
-    if (value.is_object()) {
-        int total = 0;
-        for (auto it = value.begin(); it != value.end(); ++it) {
-            total += EstimateStringChars(it.value());
-        }
-        return total;
-    }
-    return 0;
-}
-
-nlohmann::json BuildAgentTemplate(const AlgorithmEntry& entry) {
-    nlohmann::json inputs = nlohmann::json::object();
-    if (!entry.card.agent_card.examples.empty()) {
-        inputs = entry.card.agent_card.examples.front().input;
-    }
-
-    nlohmann::json required_capabilities = nlohmann::json::array();
-    nlohmann::json preferred_capabilities = nlohmann::json::array();
-    if (!entry.card.capabilities.empty()) {
-        required_capabilities.push_back(entry.card.capabilities.front());
-        for (std::size_t index = 1; index < entry.card.capabilities.size(); ++index) {
-            preferred_capabilities.push_back(entry.card.capabilities[index]);
-        }
-    }
-
-    const int max_latency_ms = entry.card.performance.has_value()
-                                   ? entry.card.performance->latency_ms_p95.value_or(
-                                         entry.card.performance->latency_ms_p50.value_or(0))
-                                   : 0;
-    const bool allow_human_review =
-        entry.card.safety.has_value() &&
-        entry.card.safety->requires_human_review.value_or(false);
-    const std::string max_risk_level =
-        entry.card.safety.has_value() && !entry.card.safety->risk_level.empty()
-            ? entry.card.safety->risk_level
-            : "medium";
-
-    nlohmann::json intent_keywords = nlohmann::json::array();
-    intent_keywords.push_back(entry.card.task_family);
-    for (const auto& capability : entry.card.capabilities) {
-        intent_keywords.push_back(capability);
-    }
-
-    return {
-        {"request_id", "req_agent_template_001"},
-        {"trace_id", "trace_agent_template_001"},
-        {"condition",
-         {
-             {"task_family", entry.card.task_family},
-             {"required_capabilities", required_capabilities},
-             {"preferred_capabilities", preferred_capabilities},
-             {"input_modalities", entry.card.modalities.input},
-             {"intent_keywords", intent_keywords},
-             {"input_chars", EstimateStringChars(inputs)},
-             {"request_bytes", static_cast<int>(JsonUtils::Dump(inputs).size())},
-             {"max_latency_ms", max_latency_ms},
-             {"allow_human_review", allow_human_review},
-             {"max_risk_level", max_risk_level},
-         }},
-        {"inputs", inputs},
-        {"params", nlohmann::json::object()},
-    };
-}
-
-Result<AlgorithmEntry> EnsureRegisteredAndActive(AlgorithmRegistry* registry,
-                                                 const std::filesystem::path& package_or_card_path) {
-    auto loaded_card_result = LoadCardForEditing(package_or_card_path);
-    if (!loaded_card_result.ok()) {
-        return loaded_card_result.status();
-    }
-
-    const AlgorithmKey key{
-        loaded_card_result.value().card.algorithm_id,
-        loaded_card_result.value().card.version,
-        loaded_card_result.value().card.backend_type,
-    };
-
-    auto existing_result = registry->Get(key);
-    if (existing_result.ok()) {
-        auto validate_result = registry->Validate(key);
-        if (!validate_result.ok()) {
-            return validate_result.status();
-        }
-        auto activate_result = registry->Activate(key);
-        if (!activate_result.ok()) {
-            return activate_result.status();
-        }
-        return activate_result.value();
-    }
-
-    auto register_result = registry->Register(package_or_card_path);
-    if (!register_result.ok()) {
-        return register_result.status();
-    }
-
-    auto activate_result = registry->Activate(register_result.value().key);
-    if (!activate_result.ok()) {
-        return activate_result.status();
-    }
-    return activate_result.value();
-}
-
-nlohmann::json BuildServiceSummary(const LoadedCard& loaded_card,
-                                   const std::optional<std::string>& start_command) {
-    nlohmann::json payload{
-        {"ok", true},
-        {"algorithm_id", loaded_card.card.algorithm_id},
-        {"version", loaded_card.card.version},
-        {"backend_type", algolib::ToString(loaded_card.card.backend_type)},
-        {"card_path", loaded_card.card_path.generic_string()},
-        {"runtime",
-         {
-             {"endpoint", loaded_card.card.machine_spec.runtime.endpoint},
-             {"health_endpoint", loaded_card.card.machine_spec.runtime.health_endpoint},
-             {"metadata_endpoint", loaded_card.card.machine_spec.runtime.metadata_endpoint},
-         }},
-    };
-    if (start_command.has_value()) {
-        payload["local_start_command"] = start_command.value();
-    }
-    return payload;
 }
 
 }  // namespace
@@ -422,25 +215,179 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
-        if (command == "list") {
-            if (args.size() != 1) {
+        // 中文注释：load — 显式预加载模型到 runner 缓存。
+        // 用法：algolib load <id> <version> <backend> [<deploy_id>]
+        // deploy_id 可选；若指定则加载完成后自动将部署状态改为 ready。
+        if (command == "load") {
+            if (args.size() < 4 || args.size() > 5) {
                 PrintUsage();
                 return 1;
             }
-            nlohmann::json list_json = nlohmann::json::array();
-            for (const auto& entry : registry.List(false)) {
-                list_json.push_back(BuildEntrySummary(entry));
+            algolib::AlgorithmKey key = ParseKeyOrThrow(args, 1);
+            const std::string deploy_id = args.size() == 5 ? args[4] : std::string();
+
+            RuntimeRunnerCache runner_cache;
+            const RuntimeFactory factory;
+            ModelLoader loader(registry, runner_cache, factory);
+            const ModelLoadRequest load_req{key.algorithm_id, key.version,
+                                            key.backend_type, deploy_id};
+            const auto load_result = loader.Load(load_req);
+            PrintJson(algolib::ToJson(load_result));
+            return load_result.ok ? 0 : 1;
+        }
+
+        // 中文注释：unload — 从 runner 缓存中移除模型，释放资源。
+        // 用法：algolib unload <id> <version> <backend> [<deploy_id>]
+        if (command == "unload") {
+            if (args.size() < 4 || args.size() > 5) {
+                PrintUsage();
+                return 1;
             }
-            PrintJson(list_json);
+            algolib::AlgorithmKey key = ParseKeyOrThrow(args, 1);
+            const std::string deploy_id = args.size() == 5 ? args[4] : std::string();
+
+            RuntimeRunnerCache runner_cache;
+            const RuntimeFactory factory;
+            ModelLoader loader(registry, runner_cache, factory);
+            const ModelLoadRequest unload_req{key.algorithm_id, key.version,
+                                              key.backend_type, deploy_id};
+            const auto unload_result = loader.Unload(unload_req);
+            PrintJson(algolib::ToJson(unload_result));
             return 0;
         }
 
-        if (command == "list-agent") {
-            if (args.size() != 1) {
+        // 中文注释：list — 多维过滤查询，支持 --key=value 风格选项。
+        // 无位置参数（除 command 本身）；所有选项均可选，不传则使用默认值。
+        if (command == "list") {
+            // 解析 --key=value 格式的选项
+            AlgorithmQueryFilter filter;
+            filter.active_only = true;  // 默认只返回 active
+
+            for (std::size_t i = 1; i < args.size(); ++i) {
+                const std::string& arg = args[i];
+                // 辅助 lambda：提取 "--key=value" 中的 value 部分
+                auto ExtractValue = [&arg](const std::string& prefix) -> std::string {
+                    if (arg.size() > prefix.size() && arg.substr(0, prefix.size()) == prefix) {
+                        return arg.substr(prefix.size());
+                    }
+                    return {};
+                };
+
+                std::string v;
+
+                // --active-only=<true|false>
+                v = ExtractValue("--active-only=");
+                if (!v.empty()) {
+                    filter.active_only = !(v == "false" || v == "0" || v == "no");
+                    continue;
+                }
+
+                // --status=<draft|validated|active|disabled>
+                v = ExtractValue("--status=");
+                if (!v.empty()) {
+                    auto parsed = ParseAlgorithmStatus(v);
+                    if (parsed.ok()) {
+                        filter.status = parsed.value();
+                    } else {
+                        std::cerr << "Unknown status value: " << v << "\n";
+                        return 1;
+                    }
+                    continue;
+                }
+
+                // --task-family=<string>
+                v = ExtractValue("--task-family=");
+                if (!v.empty()) {
+                    filter.task_family = v;
+                    continue;
+                }
+
+                // --backend=<onnx|python_http_service>
+                v = ExtractValue("--backend=");
+                if (!v.empty()) {
+                    auto parsed = ParseBackendType(v);
+                    if (parsed.ok()) {
+                        filter.backend_type = parsed.value();
+                    } else {
+                        std::cerr << "Unknown backend value: " << v << "\n";
+                        return 1;
+                    }
+                    continue;
+                }
+
+                // --capability=<string>
+                v = ExtractValue("--capability=");
+                if (!v.empty()) {
+                    filter.capability = v;
+                    continue;
+                }
+
+                v = ExtractValue("--function-id=");
+                if (!v.empty()) {
+                    filter.function_id = v;
+                    continue;
+                }
+
+                v = ExtractValue("--function-code=");
+                if (!v.empty()) {
+                    filter.function_code = v;
+                    continue;
+                }
+
+                // --node=<node_id>
+                v = ExtractValue("--node=");
+                if (!v.empty()) {
+                    filter.node_id = v;
+                    continue;
+                }
+
+                // --max-vram=<MB>
+                v = ExtractValue("--max-vram=");
+                if (!v.empty()) {
+                    try {
+                        filter.max_vram_mb = std::stoi(v);
+                    } catch (...) {
+                        std::cerr << "Invalid value for --max-vram: " << v << "\n";
+                        return 1;
+                    }
+                    continue;
+                }
+
+                // --max-memory=<MB>
+                v = ExtractValue("--max-memory=");
+                if (!v.empty()) {
+                    try {
+                        filter.max_memory_mb = std::stoi(v);
+                    } catch (...) {
+                        std::cerr << "Invalid value for --max-memory: " << v << "\n";
+                        return 1;
+                    }
+                    continue;
+                }
+
+                // --max-cpu-cores=<n>
+                v = ExtractValue("--max-cpu-cores=");
+                if (!v.empty()) {
+                    try {
+                        filter.max_cpu_cores = std::stoi(v);
+                    } catch (...) {
+                        std::cerr << "Invalid value for --max-cpu-cores: " << v << "\n";
+                        return 1;
+                    }
+                    continue;
+                }
+
+                // 未知选项
+                std::cerr << "Unknown option: " << arg << "\n";
                 PrintUsage();
                 return 1;
             }
-            PrintJson(nlohmann::json(registry.ListAgentViews(true)));
+
+            nlohmann::json list_json = nlohmann::json::array();
+            for (const auto& entry : registry.Query(filter)) {
+                list_json.push_back(BuildEntrySummary(entry));
+            }
+            PrintJson(list_json);
             return 0;
         }
 
@@ -485,75 +432,29 @@ int main(int argc, char* argv[]) {
             return run_result.ok ? 0 : 1;
         }
 
-        if (command == "agent-run") {
-            if (args.size() != 2) {
+        // 中文注释：deploy — 从 JSON 文件读取 DeploymentSpec 并追加到指定算法的部署列表。
+        // 用法：algolib deploy <id> <version> <backend> <spec.json>
+        if (command == "deploy") {
+            if (args.size() != 5) {
                 PrintUsage();
                 return 1;
             }
+            algolib::AlgorithmKey key = ParseKeyOrThrow(args, 1);
 
-            auto request_path_result = FileUtils::NormalizeInputPath(args[1]);
-            if (!request_path_result.ok()) {
-                return PrintStatusError(request_path_result.status());
+            auto spec_path_result = FileUtils::NormalizeInputPath(args[4]);
+            if (!spec_path_result.ok()) {
+                return PrintStatusError(spec_path_result.status());
+            }
+            auto spec_json_result = JsonUtils::ReadJsonFile(spec_path_result.value());
+            if (!spec_json_result.ok()) {
+                return PrintStatusError(spec_json_result.status());
+            }
+            auto spec_result = algolib::DeploymentSpecFromJson(spec_json_result.value());
+            if (!spec_result.ok()) {
+                return PrintStatusError(spec_result.status());
             }
 
-            auto request_json = JsonUtils::ReadJsonFile(request_path_result.value());
-            if (!request_json.ok()) {
-                return PrintStatusError(request_json.status());
-            }
-
-            auto request_result = AgentRoutingRequestFromJson(request_json.value());
-            if (!request_result.ok()) {
-                return PrintStatusError(request_result.status());
-            }
-
-            ExecutionCoordinator coordinator(registry);
-            const auto run_result = coordinator.RouteForAgent(request_result.value());
-            PrintJson(algolib::ToJson(run_result));
-            return run_result.ok ? 0 : 1;
-        }
-
-        if (command == "agent-template") {
-            AlgorithmKey key = ParseKeyOrThrow(args, 1);
-            auto result = registry.Get(key);
-            if (!result.ok()) {
-                return PrintStatusError(result.status());
-            }
-            PrintJson(BuildAgentTemplate(result.value()));
-            return 0;
-        }
-
-        if (command == "configure-service") {
-            if (args.size() != 3) {
-                PrintUsage();
-                return 1;
-            }
-
-            auto loaded_card_result = LoadCardForEditing(args[1]);
-            if (!loaded_card_result.ok()) {
-                return PrintStatusError(loaded_card_result.status());
-            }
-
-            LoadedCard loaded_card = loaded_card_result.value();
-            auto configure_status = ConfigurePythonServiceBaseUrl(&loaded_card, args[2]);
-            if (!configure_status.ok()) {
-                return PrintStatusError(configure_status);
-            }
-            auto save_status = SaveCard(loaded_card);
-            if (!save_status.ok()) {
-                return PrintStatusError(save_status);
-            }
-
-            PrintJson(BuildServiceSummary(loaded_card, BuildLocalStartCommand(loaded_card, args[2])));
-            return 0;
-        }
-
-        if (command == "register-activate") {
-            if (args.size() != 2) {
-                PrintUsage();
-                return 1;
-            }
-
-            auto result = EnsureRegisteredAndActive(&registry, args[1]);
+            auto result = registry.AddDeployment(key, spec_result.value());
             if (!result.ok()) {
                 return PrintStatusError(result.status());
             }
@@ -562,42 +463,72 @@ int main(int argc, char* argv[]) {
                 {"algorithm_id", result.value().key.algorithm_id},
                 {"version", result.value().key.version},
                 {"backend_type", algolib::ToString(result.value().key.backend_type)},
-                {"status", algolib::ToString(result.value().status)},
-                {"agent_template", BuildAgentTemplate(result.value())},
+                {"deploy_id", spec_result.value().deploy_id},
+                {"deploy_status", algolib::ToString(spec_result.value().deploy_status)},
             });
             return 0;
         }
 
-        if (command == "bootstrap-service") {
-            if (args.size() != 3) {
+        // 中文注释：undeploy — 从指定算法的部署列表中删除一条部署记录。
+        // 用法：algolib undeploy <id> <version> <backend> <deploy_id>
+        if (command == "undeploy") {
+            if (args.size() != 5) {
                 PrintUsage();
                 return 1;
             }
+            algolib::AlgorithmKey key = ParseKeyOrThrow(args, 1);
+            const std::string deploy_id = args[4];
 
-            auto loaded_card_result = LoadCardForEditing(args[1]);
-            if (!loaded_card_result.ok()) {
-                return PrintStatusError(loaded_card_result.status());
+            auto result = registry.RemoveDeployment(key, deploy_id);
+            if (!result.ok()) {
+                return PrintStatusError(result.status());
+            }
+            PrintJson({
+                {"ok", true},
+                {"algorithm_id", result.value().key.algorithm_id},
+                {"version", result.value().key.version},
+                {"backend_type", algolib::ToString(result.value().key.backend_type)},
+                {"removed_deploy_id", deploy_id},
+                {"remaining_deployments",
+                 static_cast<int>(result.value().deployments.size())},
+            });
+            return 0;
+        }
+
+        // 中文注释：deploy-status — 更新指定部署记录的状态。
+        // 用法：algolib deploy-status <id> <version> <backend> <deploy_id>
+        //       <loading|ready|error|unloaded> [status_message] [updated_at]
+        if (command == "deploy-status") {
+            if (args.size() < 6) {
+                PrintUsage();
+                return 1;
+            }
+            algolib::AlgorithmKey key = ParseKeyOrThrow(args, 1);
+            const std::string deploy_id = args[4];
+            const std::string raw_status = args[5];
+            const std::string status_message = args.size() >= 7 ? args[6] : std::string();
+            const std::string updated_at = args.size() >= 8 ? args[7] : std::string();
+
+            auto new_status_result = algolib::ParseDeploymentStatus(raw_status);
+            if (!new_status_result.ok()) {
+                return PrintStatusError(new_status_result.status());
             }
 
-            LoadedCard loaded_card = loaded_card_result.value();
-            auto configure_status = ConfigurePythonServiceBaseUrl(&loaded_card, args[2]);
-            if (!configure_status.ok()) {
-                return PrintStatusError(configure_status);
+            auto result = registry.UpdateDeploymentStatus(
+                key, deploy_id, new_status_result.value(), status_message, updated_at);
+            if (!result.ok()) {
+                return PrintStatusError(result.status());
             }
-            auto save_status = SaveCard(loaded_card);
-            if (!save_status.ok()) {
-                return PrintStatusError(save_status);
-            }
-
-            auto activate_result = EnsureRegisteredAndActive(&registry, loaded_card.card_path);
-            if (!activate_result.ok()) {
-                return PrintStatusError(activate_result.status());
-            }
-
-            auto response = BuildServiceSummary(loaded_card, BuildLocalStartCommand(loaded_card, args[2]));
-            response["status"] = algolib::ToString(activate_result.value().status);
-            response["agent_template"] = BuildAgentTemplate(activate_result.value());
-            PrintJson(response);
+            PrintJson({
+                {"ok", true},
+                {"algorithm_id", result.value().key.algorithm_id},
+                {"version", result.value().key.version},
+                {"backend_type", algolib::ToString(result.value().key.backend_type)},
+                {"deploy_id", deploy_id},
+                {"deploy_status", algolib::ToString(new_status_result.value())},
+                {"status_message", status_message},
+                {"updated_at", updated_at},
+            });
             return 0;
         }
 
